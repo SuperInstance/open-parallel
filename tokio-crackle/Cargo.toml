@@ -1,0 +1,19 @@
+[package]
+name = "tokio-crackle"
+version = "0.1.0"
+edition = "2021"
+description = "Task intelligence for Tokio — detect correlated tasks, starvation cascades, and runtime phase transitions using information-theoretic measures from crackle-runtime."
+authors = ["SuperInstance"]
+repository = "https://github.com/SuperInstance/tokio"
+license = "MIT"
+
+[dependencies]
+tokio = { path = "../tokio" }
+serde = { version = "1", features = ["derive"], optional = true }
+
+[dev-dependencies]
+fastrand = "2"
+
+[features]
+default = []
+serde = ["dep:serde"]
