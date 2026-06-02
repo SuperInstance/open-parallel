@@ -4,19 +4,26 @@
 
 # Tokio
 
-> ⭐ **SuperInstance Enhancement: Task Intelligence** — Your async runtime has structure.
-> This shows you which tasks cause cascades. Same tokio. Self-aware tokio.
-> [`tokio-crackle`](./tokio-crackle) — task monitoring with information-theoretic measures.
+> **SuperInstance Enhancement: Task Intelligence** — [`tokio-crackle`](./tokio-crackle)
+
+Your async runtime has 847 tasks running. Some of them are correlated — when one spikes, another spikes 200 ms later. You can't see this. Nobody can.
+
+[`tokio-crackle`](./tokio-crackle) makes it visible. It builds a correlation graph from task metrics. Transfer entropy measures whether task A predicts task B's behavior. It finds clusters of tasks that always spike together, and it detects when your runtime shifts between phases.
+
+---
+
+**Task `"db-pool"` → task `"http-handler"`: transfer entropy = 0.73.** When `db-pool` latency spikes, `http-handler` latency spikes 180 ms later. 89% of the time.
+
+**Task `"cache-invalidator"` has JSD = 0.45 from its baseline.** It's behaving differently than usual. Something changed.
+
+**Your runtime has three task clusters that always spike together.** They share a connection pool. The pool is the bottleneck — not any individual task.
+
+**Runtime phases: Startup (0-2 s), Steady (2 s-4 h), Stressed (4 h+).** Conservation laws differ per phase. [`tokio-crackle`](./tokio-crackle) tracks which phase your runtime is in.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/tokio-rs/tokio/master/docs/assets/brand.png" alt="Tokio" width="100" height="auto">
   <img src="https://raw.githubusercontent.com/SuperInstance/crackle-runtime/main/docs/crackle-logo.png" alt="+" width="30" height="auto">
 </p>
-
----
-
-Explore the [`tokio-crackle`](./tokio-crackle) crate to monitor task execution patterns,
-detect starvation cascades, and observe phase transitions in your runtime.
 
 
 
