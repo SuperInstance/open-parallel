@@ -4,6 +4,22 @@
 
 # Tokio
 
+> ⭐ **SuperInstance Enhancement: Task Intelligence** — Your async runtime has structure.
+> This shows you which tasks cause cascades. Same tokio. Self-aware tokio.
+> [`tokio-crackle`](./tokio-crackle) — task monitoring with information-theoretic measures.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tokio-rs/tokio/master/docs/assets/brand.png" alt="Tokio" width="100" height="auto">
+  <img src="https://raw.githubusercontent.com/SuperInstance/crackle-runtime/main/docs/crackle-logo.png" alt="+" width="30" height="auto">
+</p>
+
+---
+
+Explore the [`tokio-crackle`](./tokio-crackle) crate to monitor task execution patterns,
+detect starvation cascades, and observe phase transitions in your runtime.
+
+
+
 A runtime for writing reliable, asynchronous, and slim applications with
 the Rust programming language. It is:
 
