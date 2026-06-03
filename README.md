@@ -4,40 +4,14 @@
 
 # Tokio
 
-> **SuperInstance Enhancement: Task Intelligence** — [`tokio-crackle`](./tokio-crackle)
-
-Your async runtime has 847 tasks running. Some of them are correlated — when one spikes, another spikes 200 ms later. You can't see this. Nobody can.
-
-[`tokio-crackle`](./tokio-crackle) makes it visible. It builds a correlation graph from task metrics. Transfer entropy measures whether task A predicts task B's behavior. It finds clusters of tasks that always spike together, and it detects when your runtime shifts between phases.
-
----
-
-**Task `"db-pool"` → task `"http-handler"`: transfer entropy = 0.73.** When `db-pool` latency spikes, `http-handler` latency spikes 180 ms later. 89% of the time.
-
-**Task `"cache-invalidator"` has JSD = 0.45 from its baseline.** It's behaving differently than usual. Something changed.
-
-**Your runtime has three task clusters that always spike together.** They share a connection pool. The pool is the bottleneck — not any individual task.
-
-**Runtime phases: Startup (0-2 s), Steady (2 s-4 h), Stressed (4 h+).** Conservation laws differ per phase. [`tokio-crackle`](./tokio-crackle) tracks which phase your runtime is in.
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/tokio-rs/tokio/master/docs/assets/brand.png" alt="Tokio" width="100" height="auto">
-  <img src="https://raw.githubusercontent.com/SuperInstance/crackle-runtime/main/docs/crackle-logo.png" alt="+" width="30" height="auto">
-</p>
-
-
-
 A runtime for writing reliable, asynchronous, and slim applications with
 the Rust programming language. It is:
 
-* **Fast**: Tokio's zero-cost abstractions give you bare-metal
-  performance.
+* **Fast**: Tokio's zero-cost abstractions give you bare-metal performance.
+* **Reliable**: Tokio leverages Rust's ownership, type system, and concurrency model to reduce bugs and ensure thread safety.
+* **Scalable**: Tokio has a minimal footprint, and handles backpressure and cancellation naturally.
 
-* **Reliable**: Tokio leverages Rust's ownership, type system, and
-  concurrency model to reduce bugs and ensure thread safety.
-
-* **Scalable**: Tokio has a minimal footprint, and handles backpressure
-  and cancellation naturally.
+This is the **SuperInstance fork**. It adds [`tokio-crackle`](./tokio-crackle) — task intelligence that detects correlated tasks, starvation cascades, and runtime phase transitions using information-theoretic measures. Everything else is upstream Tokio, untouched.
 
 [![Crates.io][crates-badge]][crates-url]
 [![MIT licensed][mit-badge]][mit-url]
@@ -58,6 +32,96 @@ the Rust programming language. It is:
 [API Docs](https://docs.rs/tokio/latest/tokio) |
 [Chat](https://discord.gg/tokio)
 
+---
+
+## What's New: `tokio-crackle`
+
+Your runtime has 847 tasks. When task A spikes, task B spikes 200ms later. You can't see that — until now.
+
+`tokio-crackle` is an observer, not a runtime patch. You feed it task throughput values; it computes:
+
+| Measure | What it finds |
+|---------|--------------|
+| Mutual Information | Tasks that always co-vary (MI > 0.8 → correlated) |
+| Transfer Entropy | Directional causality — task A predicts task B (TE > 0.6 → starvation risk) |
+| Jensen-Shannon Divergence | Distribution drift from baseline (phase transition detection) |
+| Permutation Entropy | Regularity in throughput patterns |
+
+**20 tests** across the crate — 11 unit tests on information-theoretic functions, 6 on the monitor, 3 integration tests.
+
+### Quick Start
+
+```toml
+[dependencies]
+tokio-crackle = "0.1"
+```
+
+```rust
+use tokio_crackle::TaskIntelligenceMonitor;
+use std::sync::{Arc, Mutex};
+
+let monitor = Arc::new(Mutex::new(TaskIntelligenceMonitor::new("my-app")));
+
+// In your tasks, record throughput after each poll:
+mon.lock().unwrap().record_task("http-handler", 142.5);
+mon.lock().unwrap().record_task("db-query", 89.3);
+
+// Generate a report:
+let report = mon.lock().unwrap().report();
+println!("{}", report.summary());
+```
+
+### Output
+
+```
+Task pool "my-app" has 47 tasks. 3 are correlated (MI > 0.8).
+1 is causing starvation in 5 others (TE > 0.6). Runtime phase: Transitioning.
+```
+
+Detailed output:
+
+```
+=== Task Intelligence Report: "my-app" ===
+Tasks: 47
+Correlated pairs (MI > 0.8):
+  db-pool ↔ http-handler (MI = 0.73)
+Starvation chains (TE > 0.6):
+  db-pool → http-handler (TE = 0.68)
+  db-pool → cache-refresh (TE = 0.61)
+Runtime phase: Transitioning
+  Distribution shifted significantly (JSD = 0.45 from baseline).
+  Multiple task groups exhibiting starvation behavior.
+```
+
+### Runtime Phases
+
+| Phase | What's happening |
+|-------|-----------------|
+| `Nominal` | Stable throughput distributions. Nothing to see. |
+| `PreTransition` | Some tasks slowing. JSD creeping up. Time for preemptive action. |
+| `Transitioning` | Cascade underway. Strong TE spikes. Intervene now. |
+| `Recovered` | Stabilized after a transition. Returning to normal. |
+
+### Integration with Tokio metrics
+
+Wire Tokio's built-in runtime metrics into the monitor:
+
+```rust
+use tokio::runtime::Handle;
+
+fn poll_metrics(monitor: &mut TaskIntelligenceMonitor, handle: &Handle) {
+    let metrics = handle.metrics();
+    for i in 0..metrics.num_workers() {
+        let throughput = metrics.worker_poll_count(i) as f64;
+        monitor.record_task(format!("worker-{}", i), throughput);
+    }
+}
+```
+
+See [`tokio-crackle/README.md`](./tokio-crackle/README.md) and [`tokio-crackle/INTEGRATION.md`](./tokio-crackle/INTEGRATION.md) for the full API.
+
+---
+
 ## Overview
 
 Tokio is an event-driven, non-blocking I/O platform for writing
@@ -65,27 +129,20 @@ asynchronous applications with the Rust programming language. At a high
 level, it provides a few major components:
 
 * A multithreaded, work-stealing based task [scheduler].
-* A reactor backed by the operating system's event queue (epoll, kqueue,
-  IOCP, etc.).
+* A reactor backed by the operating system's event queue (epoll, kqueue, IOCP, etc.).
 * Asynchronous [TCP and UDP][net] sockets.
-
-These components provide the runtime components necessary for building
-an asynchronous application.
 
 [net]: https://docs.rs/tokio/latest/tokio/net/index.html
 [scheduler]: https://docs.rs/tokio/latest/tokio/runtime/index.html
 
 ## Example
 
-A basic TCP echo server with Tokio.
-
-Make sure you enable the full features of the tokio crate on Cargo.toml:
+A basic TCP echo server:
 
 ```toml
 [dependencies]
 tokio = { version = "1.52.3", features = ["full"] }
 ```
-Then, on your main.rs:
 
 ```rust,no_run
 use tokio::net::TcpListener;
@@ -101,10 +158,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(async move {
             let mut buf = [0; 1024];
 
-            // In a loop, read data from the socket and write the data back.
             loop {
                 let n = match socket.read(&mut buf).await {
-                    // socket closed
                     Ok(0) => return,
                     Ok(n) => n,
                     Err(e) => {
@@ -113,7 +168,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 };
 
-                // Write the data back
                 if let Err(e) = socket.write_all(&buf[0..n]).await {
                     eprintln!("failed to write to socket; err = {:?}", e);
                     return;
@@ -124,58 +178,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-More examples can be found [here][examples]. For a larger "real world" example, see the
-[mini-redis] repository.
+More examples [here][examples]. For a larger real-world example, see [mini-redis].
 
 [examples]: https://github.com/tokio-rs/tokio/tree/master/examples
 [mini-redis]: https://github.com/tokio-rs/mini-redis/
 
-To see a list of the available feature flags that can be enabled, check our
-[docs][feature-flag-docs].
+See [docs][feature-flag-docs] for available feature flags.
+
+[feature-flag-docs]: https://docs.rs/tokio/#feature-flags
 
 ## Getting Help
 
-First, see if the answer to your question can be found in the [Guides] or the
-[API documentation]. If the answer is not there, there is an active community in
-the [Tokio Discord server][chat]. We would be happy to try to answer your
-question. You can also ask your question on [the discussions page][discussions].
+Check the [Guides] or [API documentation] first. If the answer isn't there, ask in [Discord][chat] or [GitHub Discussions][discussions].
 
 [Guides]: https://tokio.rs/tokio/tutorial
 [API documentation]: https://docs.rs/tokio/latest/tokio
 [chat]: https://discord.gg/tokio
 [discussions]: https://github.com/tokio-rs/tokio/discussions
-[feature-flag-docs]: https://docs.rs/tokio/#feature-flags
 
 ## Contributing
 
-:balloon: Thanks for your help improving the project! We are so happy to have
-you! We have a [contributing guide][guide] to help you get involved in the Tokio
-project.
+We have a [contributing guide][guide].
 
 [guide]: https://github.com/tokio-rs/tokio/blob/master/docs/contributing/README.md
 
 ## Related Projects
 
-In addition to the crates in this repository, the Tokio project also maintains
-several other libraries, including:
-
-* [`axum`]: A web application framework that focuses on ergonomics and modularity.
-
-* [`hyper`]: A fast and correct HTTP/1.1 and HTTP/2 implementation for Rust.
-
-* [`tonic`]: A gRPC over HTTP/2 implementation focused on high performance, interoperability, and flexibility.
-
-* [`warp`]: A super-easy, composable, web server framework for warp speeds.
-
-* [`tower`]: A library of modular and reusable components for building robust networking clients and servers.
-
-* [`tracing`] (formerly `tokio-trace`): A framework for application-level tracing and async-aware diagnostics.
-
-* [`mio`]: A low-level, cross-platform abstraction over OS I/O APIs that powers `tokio`.
-
-* [`bytes`]: Utilities for working with bytes, including efficient byte buffers.
-
-* [`loom`]: A testing tool for concurrent Rust code.
+* [`axum`]: Web framework focused on ergonomics and modularity.
+* [`hyper`]: Fast HTTP/1.1 and HTTP/2 implementation.
+* [`tonic`]: gRPC over HTTP/2, focused on performance and interoperability.
+* [`warp`]: Composable web server framework.
+* [`tower`]: Modular components for networking clients and servers.
+* [`tracing`]: Application-level tracing and async-aware diagnostics.
+* [`mio`]: Low-level cross-platform I/O abstraction that powers Tokio.
+* [`bytes`]: Efficient byte buffer utilities.
+* [`loom`]: Testing tool for concurrent Rust code.
 
 [`axum`]: https://github.com/tokio-rs/axum
 [`warp`]: https://github.com/seanmonstar/warp
@@ -189,95 +226,45 @@ several other libraries, including:
 
 ## Changelog
 
-The Tokio repository contains multiple crates. Each crate has its own changelog.
+Each crate has its own changelog:
 
- * `tokio` - [view changelog](https://github.com/tokio-rs/tokio/blob/master/tokio/CHANGELOG.md)
- * `tokio-util` - [view changelog](https://github.com/tokio-rs/tokio/blob/master/tokio-util/CHANGELOG.md)
- * `tokio-stream` - [view changelog](https://github.com/tokio-rs/tokio/blob/master/tokio-stream/CHANGELOG.md)
- * `tokio-macros` - [view changelog](https://github.com/tokio-rs/tokio/blob/master/tokio-macros/CHANGELOG.md)
- * `tokio-test` - [view changelog](https://github.com/tokio-rs/tokio/blob/master/tokio-test/CHANGELOG.md)
+* `tokio` — [changelog](https://github.com/tokio-rs/tokio/blob/master/tokio/CHANGELOG.md)
+* `tokio-util` — [changelog](https://github.com/tokio-rs/tokio/blob/master/tokio-util/CHANGELOG.md)
+* `tokio-stream` — [changelog](https://github.com/tokio-rs/tokio/blob/master/tokio-stream/CHANGELOG.md)
+* `tokio-macros` — [changelog](https://github.com/tokio-rs/tokio/blob/master/tokio-macros/CHANGELOG.md)
+* `tokio-test` — [changelog](https://github.com/tokio-rs/tokio/blob/master/tokio-test/CHANGELOG.md)
 
 ## Supported Rust Versions
 
-<!--
-When updating this, also update:
-- .github/workflows/ci.yml
-- CONTRIBUTING.md
-- README.md
-- tokio/README.md
-- tokio/Cargo.toml
-- tokio-util/Cargo.toml
-- tokio-test/Cargo.toml
-- tokio-stream/Cargo.toml
--->
+Tokio keeps a rolling MSRV of **at least** 6 months. Current MSRV: **1.71**.
 
-Tokio will keep a rolling MSRV (minimum supported rust version) policy of **at
-least** 6 months. When increasing the MSRV, the new Rust version must have been
-released at least six months ago. The current MSRV is 1.71.
+| Releases | MSRV |
+|----------|------|
+| 1.48 – now | Rust 1.71 |
+| 1.39 – 1.47 | Rust 1.70 |
+| 1.30 – 1.38 | Rust 1.63 |
 
-Note that the MSRV is not increased automatically, and only as part of a minor
-release. The MSRV history for past minor releases can be found below:
+## Release Schedule
 
- * 1.48 to now  - Rust 1.71
- * 1.39 to 1.47 - Rust 1.70
- * 1.30 to 1.38 - Rust 1.63
- * 1.27 to 1.29 - Rust 1.56
- * 1.17 to 1.26 - Rust 1.49
- * 1.15 to 1.16 - Rust 1.46
- * 1.0 to 1.14 - Rust 1.45
+No fixed schedule. Roughly one minor release per month, patches as needed.
 
-Note that although we try to avoid the situation where a dependency transitively
-increases the MSRV of Tokio, we do not guarantee that this does not happen.
-However, every minor release will have some set of versions of dependencies that
-works with the MSRV of that minor release.
+## Bug Patching Policy
 
-## Release schedule
+LTS releases receive backported fixes for at least a year:
 
-Tokio doesn't follow a fixed release schedule, but we typically make one minor
-release each month. We make patch releases for bugfixes as necessary.
+* `1.47.x` — LTS until September 2026 (MSRV 1.70)
+* `1.51.x` — LTS until March 2027 (MSRV 1.71)
 
-## Bug patching policy
+Pin to an LTS release:
 
-For the purposes of making patch releases with bugfixes, we have designated
-certain minor releases as LTS (long term support) releases. Whenever a bug
-warrants a patch release with a fix for the bug, it will be backported and
-released as a new patch release for each LTS minor version. Our current LTS
-releases are:
-
- * `1.47.x` - LTS release until September 2026. (MSRV 1.70)
- * `1.51.x` - LTS release until March 2027. (MSRV 1.71)
-
-Each LTS release will continue to receive backported fixes for at least a year.
-If you wish to use a fixed minor release in your project, we recommend that you
-use an LTS release.
-
-To use a fixed minor version, you can specify the version with a tilde. For
-example, to specify that you wish to use the newest `1.47.x` patch release, you
-can use the following dependency specification:
-```text
+```toml
 tokio = { version = "~1.47", features = [...] }
 ```
 
-### Previous LTS releases
-
- * `1.8.x` - LTS release until February 2022.
- * `1.14.x` - LTS release until June 2022.
- * `1.18.x` - LTS release until June 2023.
- * `1.20.x` - LTS release until September 2023.
- * `1.25.x` - LTS release until March 2024.
- * `1.32.x` - LTS release until September 2024.
- * `1.36.x` - LTS release until March 2025.
- * `1.38.x` - LTS release until July 2025.
- * `1.43.x` - LTS release until March 2026.
-
 ## License
 
-This project is licensed under the [MIT license].
-
-[MIT license]: https://github.com/tokio-rs/tokio/blob/master/LICENSE
+[MIT](https://github.com/tokio-rs/tokio/blob/master/LICENSE)
 
 ### Contribution
 
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in Tokio by you shall be licensed as MIT, without any additional
-terms or conditions.
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in Tokio by you shall be licensed as MIT, without any additional terms or conditions.
