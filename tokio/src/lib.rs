@@ -692,3 +692,5 @@ fn is_unpin<T: Unpin>() {}
 /// fuzz test (`fuzz_linked_list`)
 #[cfg(fuzzing)]
 pub mod fuzz;
+pub mod spectral_scheduler;
+pub mod deadline_executor;
