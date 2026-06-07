@@ -1,0 +1,29 @@
+# CAPABILITY.toml — open-parallel
+# High-performance async runtime with spectral scheduling and deadline execution.
+
+[capability]
+name = "open-parallel"
+version = "0.1.0"
+description = "Async runtime with spectral scheduling, deadline-aware execution, and conservation-aware resource management"
+
+[capability.capabilities]
+spectral_scheduler = "module: tokio-crackle — eigenvalue-based task scheduling for optimal throughput"
+deadline_executor = "fn spawn_deadline(task: Future, deadline: Instant) -> DeadlineHandle — deadline-aware task execution"
+conservation_budget = "fn allocate_budget(total: f64) -> Budget — partition resources using γ+H=C conservation law"
+spectral_rank = "fn rank_tasks(tasks: Vec<Task>) -> Vec<RankedTask> — spectral importance ranking of tasks"
+parallel_induce = "fn induce_parallel(patterns: Vec<Pattern>) -> ParallelPlan — generate parallel execution plan from patterns"
+
+[capability.exports]
+DeadlineHandle = "struct { task_id, deadline, status }"
+RankedTask = "struct { task, eigenvalue_score, dependencies }"
+Budget = "struct { gamma, eta, capacity }"
+ParallelPlan = "struct { stages, critical_path, estimated_speedup }"
+
+[capability.depends]
+depends = ["open-terminal", "open-iterator"]
+
+[capability.integrations]
+open-terminal = "Conservation monitoring feeds spectral scheduler parameters"
+open-iterator = "Spectral code ranking informs task priority scheduling"
+open-mind = "Parallel induction across AST subtrees"
+open-application = "Runtime execution of capability-loaded agent tasks"
